@@ -1,0 +1,39 @@
+## @file
+#
+# Qualcomm common platform package declaration file for functionality shared
+# across Qualcomm platforms.
+#
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 1.27
+  PACKAGE_NAME                   = QualcommCommonPlatformPkg
+  PACKAGE_GUID                   = 207534D6-8A62-4168-9031-EEF0AFC950DF
+  PACKAGE_VERSION                = 0.1
+
+################################################################################
+#
+# Include Section - list of Include Paths that are provided by this package.
+#                   Comments are used for Keywords and Module Types.
+#
+################################################################################
+
+[Includes.common]
+  Include
+
+[LibraryClasses]
+  ##  @libraryclass  Provides UEFI-style wrapper functions for the Qualcomm
+  ##                 DTFramework Device Tree APIs.
+  ##
+  DtFrameworkLib|Include/DtFrameworkLib.h
+
+[Guids]
+  gQualcommCommonPlatformPkgTokenSpaceGuid     = {0x736f3b84, 0x6459, 0x4a17, {0x99, 0x5a, 0x95, 0x44, 0x24, 0x77, 0x3b, 0x9c}}
+  gEfiDtbExtnIntfHobGuid                       = {0x1f5d141c, 0x6d8d, 0x42c0, {0xb5, 0x77, 0xd9, 0x1a, 0x57, 0xbc, 0x9c, 0x33}}
+
+[Protocols]
+  #Devicetree Extension Protocol Guid
+  gEfiDtbExtnProtocolGuid                      = {0x0389b776, 0x625f, 0x11eb, {0x83, 0xbe, 0xc7, 0x41, 0xa9, 0x13, 0xde, 0x34}}

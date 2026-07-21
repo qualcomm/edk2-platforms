@@ -1,0 +1,82 @@
+## @file
+#  BaseDtFrameworkLib - real implementation.
+#
+#  Provides UEFI-style wrapper functions for the Qualcomm DTFramework
+#  Device Tree APIs.  All DTFramework C sources are compiled directly
+#  into this library, eliminating the need for the intermediate
+#  DtFrameworkExtnDtLib, DtFrameworkSelectDtLib, and DtFrameworkGetDtLib
+#  library classes.
+#
+#  Use BaseDtFrameworkNullLib.inf when building without DTFramework.
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = BaseDtFrameworkLib
+  FILE_GUID                      = 4A7C3E1B-9F82-4D56-A3C8-1E5F2B7D0A94
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = DtFrameworkLib
+
+  DEFINE DTBEXTNLIB_PATH         =  DTFramework/libs/DTBExtnLib
+  DEFINE DTSELECT_PATH           =  DTFramework/libs/DTSelectLib
+
+  #
+  # DTFRAMEWORK_INC points to the DTFramework submodule include directory.
+  # This is a private include path used only by the DTFramework C sources
+  # compiled into this library; it is not exposed to consumers.
+  #
+  DEFINE DTFRAMEWORK_INC         = $(WORKSPACE)/edk2-platforms/Platform/Qualcomm/Common/QualcommCommonPlatformPkg/Library/BaseDtFrameworkLib/DTFramework/inc
+
+  #
+  # FDTLIB_BASE must point to MdePkg/Library/BaseFdtLib in the edk2 tree.
+  # Override this DEFINE in the platform DSC if edk2 is not located at
+  # $(WORKSPACE)/edk2 (e.g. add:
+  #   DEFINE FDTLIB_BASE = $(WORKSPACE)/edk2-stable202502/MdePkg/Library/BaseFdtLib
+  # to the [Defines] section of the consuming DSC).
+  # These paths expose libfdt internal headers required by the DTFramework C
+  # sources; they are not available through MdePkg.dec.
+  #
+  DEFINE FDTLIB_BASE             = $(WORKSPACE)/edk2/MdePkg/Library/BaseFdtLib
+
+[Sources.common]
+  BaseDtFrameworkLib.c
+  DtFrameworkLibSupport.c
+
+  # DTBExtnLib - node/property/blob/overlay APIs (was DtFrameworkExtnDtLib)
+  $(DTBEXTNLIB_PATH)/DTBExtnLib_blob.c
+  $(DTBEXTNLIB_PATH)/DTBExtnLib_node.c
+  $(DTBEXTNLIB_PATH)/DTBExtnLib_prop.c
+  $(DTBEXTNLIB_PATH)/DTBExtnLib_driver.c
+  $(DTBEXTNLIB_PATH)/DTBExtnLib_overlay.c
+
+  # DTSelectLib - DTB selection (was DtFrameworkSelectDtLib)
+  $(DTSELECT_PATH)/Environment/dt_select_env.c
+  $(DTSELECT_PATH)/dt_select.c
+
+  # GetDt - packed-DTB selection entry point (was DtFrameworkGetDtLib)
+  $(DTSELECT_PATH)/get_dt.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  ArmPkg/ArmPkg.dec
+  QualcommCommonPlatformPkg/QualcommCommonPlatformPkg.dec
+  QualcommPlatformPkg/QualcommPlatformPkg.dec
+
+[LibraryClasses]
+  BaseLib
+  DebugLib
+  FdtLib
+  HobLib
+  TimerLib
+
+[Guids]
+  gEfiDtbExtnIntfHobGuid
+
+[BuildOptions]
+  GCC:*_*_*_CC_FLAGS = -I$(DTFRAMEWORK_INC) -I$(FDTLIB_BASE) -I$(FDTLIB_BASE)/libfdt/libfdt -nostdinc -Wno-unused-but-set-variable -DTARGET_UEFI

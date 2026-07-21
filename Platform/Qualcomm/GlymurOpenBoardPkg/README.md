@@ -25,6 +25,7 @@ This project brings UEFI support to Glymur (AARCH64) following the MinPlatform s
     - edk2-platforms/Platform
     - edk2/ArmPlatformPkg
     - edk2-platforms/Platform/Qualcomm
+    - edk2-platforms/Platform/Qualcomm/Common
     - edk2-platforms/Silicon/Qualcomm
 
 ## Build and Sign (Recommended)
