@@ -7,3 +7,4 @@
 ##
 
 [LibraryClasses.Common]
+  ChipInfoLib|Silicon/Qualcomm/Common/QualcommCommonSiliconPkg/Library/ChipInfoLib/ChipInfoLib.inf
