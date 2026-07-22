@@ -1,0 +1,31 @@
+#/** @file PlatformInfoLib.inf
+#
+#  Component description file for PlatformInfo DXE driver module
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+#
+#**/
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = PlatformInfoLib
+  FILE_GUID                      = 1a0af404-ecc1-4f0a-a1ca-4ede122affad
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = PlatformInfoLib
+
+[Sources.common]
+  PlatformInfo.c
+  PlatformInfoLib.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  ArmPkg/ArmPkg.dec
+  QualcommPlatformPkg/QualcommPlatformPkg.dec
+  QualcommSiliconPkg/QualcommSiliconPkg.dec
+
+[LibraryClasses]
+  SmemLib
