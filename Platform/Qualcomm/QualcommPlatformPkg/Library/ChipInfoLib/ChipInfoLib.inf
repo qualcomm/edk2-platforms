@@ -1,0 +1,32 @@
+#/** @file ChipInfoLib.inf
+#
+#  ChipInfo Library
+#
+#  Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+#  SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+#**/
+
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = ChipInfoLib
+  FILE_GUID                      = 98A14454-3D05-48A7-B877-29490350D057
+  MODULE_TYPE                    = BASE
+  VERSION_STRING                 = 1.0
+  LIBRARY_CLASS                  = ChipInfoLib
+
+[Sources.common]
+  ChipInfo.c
+  ChipInfoLib.c
+  ChipInfoImage.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  EmbeddedPkg/EmbeddedPkg.dec
+  QualcommPlatformPkg/QualcommPlatformPkg.dec
+  QualcommSiliconPkg/QualcommSiliconPkg.dec
+
+[LibraryClasses]
+  SmemLib
+  BaseMemoryLib
