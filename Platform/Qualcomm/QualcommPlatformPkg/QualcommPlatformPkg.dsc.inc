@@ -40,9 +40,13 @@
   #
   # Qualcomm Libraries
   #
+  DtFrameworkLib|QualcommCommonPlatformPkg/Library/BaseDtFrameworkLib/BaseDtFrameworkLibNull.inf
+
   ReportCpuHobLib|QualcommPlatformPkg/Library/ReportCpuHobLib/ReportCpuHobLib.inf
   ArmPlatformLib|QualcommPlatformPkg/Library/ArmPlatformLib/ArmPlatformLib.inf
   RamPartitionTableLib|QualcommPlatformPkg/Library/RamPartitionTableLib/RamPartitionTableLib.inf
+  ChipInfoLib|QualcommPlatformPkg/Library/ChipInfoLib/ChipInfoLib.inf
+  PlatformInfoLib|QualcommPlatformPkg/Library/PlatformInfoLib/PlatformInfoLib.inf
 
 [Components.AARCH64]
   ArmPkg/Drivers/TimerDxe/TimerDxe.inf

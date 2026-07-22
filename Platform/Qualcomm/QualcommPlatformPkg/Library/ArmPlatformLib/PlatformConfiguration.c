@@ -9,6 +9,7 @@
 #include <Library/BaseMemoryLib.h>
 #include <Library/CacheMaintenanceLib.h>
 #include <Library/DebugLib.h>
+#include <Library/DtFrameworkLib.h>
 #include <Library/MemoryAllocationLib.h>
 #include <Library/RamPartitionTableLib.h>
 #include <Library/PcdLib.h>
@@ -16,6 +17,7 @@
 #include <Library/SortLib.h>
 
 #include <PlatformConfiguration.h>
+#include <PlatformDeviceTree.h>
 
 #define MAX_MEMORY_REGIONS  125
 
@@ -25,6 +27,18 @@ STATIC UINTN            mNumMemoryMapRegion = 0;
 STATIC UINT64           mMemMapLow          = 0xFFFFFFFFFFFFFFFFULL;
 STATIC UINT64           mMemMapHigh         = 0;
 STATIC BOOLEAN          mIsMemMapHighNoMap  = FALSE;
+
+STATIC STRING_CONFIGURATION_PAIR   *mStrConfigTable          = NULL;
+STATIC INTEGER_CONFIGURATION_PAIR  *mIntConfigTable          = NULL;
+STATIC UINTN                       mStrConfigTableEntryCount = 0;
+STATIC UINTN                       mIntConfigTableEntryCount = 0;
+
+EFI_STATUS
+EFIAPI
+InitMmu (
+  IN MEM_REGION_INFO  *pMemRegions,
+  IN UINTN            RegionsCnt
+  );
 
 /**
   Allocates and zeros a buffer.
@@ -101,6 +115,671 @@ AllocateMemNoFree (
   AllocatedPtr   = FreeBufferPtr;
   FreeBufferPtr += Size;
   return AllocatedPtr;
+}
+
+/**
+  This function parses device tree for Int Configuration parameter entries
+  into IntConfigTable Structure and the count of entries into IntConfigTableEntryCount.
+
+  @retval EFI_SUCCESS           IntConfigTable Structure is updated with all Int ConfigParams.
+  @retval EFI_LOAD_ERROR        Failed to update aall Int ConfigParams to IntConfigTable Struct.
+
+**/
+EFI_STATUS
+EFIAPI
+ParseIntConfigEntriesFromDT (
+  VOID
+  )
+{
+  EFI_STATUS      Status;
+  INT32           FdtStatus;
+  DT_NODE_HANDLE  Node;
+  UINT64          MaxIntConfigPairCount;
+  UINT32          PropNameBufferSize;
+  CHAR8           *Buff;
+  CHAR8           *BuffWalk;
+  UINT64          Index;
+  UINT32          WalkLength;
+  UINTN           AllocSize;
+
+  Status                = EFI_LOAD_ERROR;
+  AllocSize             = 0;
+  MaxIntConfigPairCount = 0;
+  PropNameBufferSize    = 0;
+  Buff                  = NULL;
+  BuffWalk              = NULL;
+  Index                 = 0;
+  WalkLength            = 0;
+
+  // Check if table is empty and Allocate table based of the total count
+  if (mIntConfigTable == NULL) {
+    FdtStatus = SecFdtGetNodeHandle (&Node, "/sw/uefi/int_param");
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      return Status;
+    }
+
+    FdtStatus = DtFwGetUint64Prop (&Node, "MaxCount", &MaxIntConfigPairCount);
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      return Status;
+    }
+
+    if ((MaxIntConfigPairCount == 0) || (MaxIntConfigPairCount > 0x10000ULL)) {
+      DEBUG ((
+        DEBUG_ERROR,
+        "ParseIntConfigEntriesFromDT: MaxCount %llu out of range\n",
+        MaxIntConfigPairCount
+        ));
+      return Status;
+    }
+
+    if (MaxIntConfigPairCount > MAX_UINTN / sizeof (INTEGER_CONFIGURATION_PAIR)) {
+      DEBUG ((DEBUG_ERROR, "ParseIntConfigEntriesFromDT: allocation size overflow\n"));
+      return Status;
+    }
+
+    AllocSize       = (UINTN)MaxIntConfigPairCount * sizeof (INTEGER_CONFIGURATION_PAIR);
+    mIntConfigTable = AllocateMemNoFree (AllocSize);
+    if (mIntConfigTable == NULL) {
+      DEBUG ((DEBUG_ERROR, "Failed to allocate enough memory for config table \n"));
+      ASSERT (mIntConfigTable != NULL);
+      return Status;
+    }
+
+    SetMem (mIntConfigTable, AllocSize, 0);
+  }
+
+  // Update the table with Key and Value Pairs
+  FdtStatus = SecFdtGetNodeHandle (&Node, "/sw/uefi/int_param");
+  if (FdtStatus != FDT_ERR_QC_NOERROR) {
+    return Status;
+  }
+
+  FdtStatus = DtFwGetPropNamesSizeOfNode (&Node, &PropNameBufferSize);
+  if (FdtStatus != FDT_ERR_QC_NOERROR) {
+    return Status;
+  }
+
+  if (PropNameBufferSize == 0) {
+    mIntConfigTableEntryCount = 0;
+    return EFI_SUCCESS;
+  }
+
+  Buff = AllocateMemNoFree (PropNameBufferSize);
+  if (Buff == NULL) {
+    DEBUG ((DEBUG_ERROR, "Failed to allocate PropNameBuff\n"));
+    ASSERT (Buff != NULL);
+    return Status;
+  }
+
+  FdtStatus = DtFwGetPropNamesOfNode (&Node, Buff, PropNameBufferSize);
+  if (FdtStatus != FDT_ERR_QC_NOERROR) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetPropNamesOfNode failed: %d\n", FdtStatus));
+    return Status;
+  }
+
+  // Walk through buffer and store property names in Table
+  BuffWalk = (CHAR8 *)Buff;
+  while (PropNameBufferSize != 0) {
+    if (Index >= MaxIntConfigPairCount) {
+      DEBUG ((DEBUG_ERROR, "ParseIntConfigEntriesFromDT: Index %llu exceeds MaxCount\n", Index));
+      break;
+    }
+
+    WalkLength = AsciiStrLen (BuffWalk);
+
+    if (WalkLength >= MAX_UINT32) {
+      DEBUG ((DEBUG_ERROR, "ParseIntConfigEntriesFromDT: WalkLength overflow\n"));
+      return Status;
+    }
+
+    if ((WalkLength + 1) > PropNameBufferSize) {
+      DEBUG ((DEBUG_ERROR, "ParseIntConfigEntriesFromDT: malformed PropNameBuff, WalkLength+1 exceeds remaining size\n"));
+      return Status;
+    }
+
+    mIntConfigTable[Index].Key = (CHAR8 *)AllocateMemNoFree (WalkLength+1);
+    if (mIntConfigTable[Index].Key == NULL) {
+      DEBUG ((DEBUG_ERROR, "Failed to allocate IntConfigTable Key\n"));
+      return Status;
+    }
+
+    AsciiStrCpyS (mIntConfigTable[Index].Key, WalkLength+1, BuffWalk);
+    FdtStatus = DtFwGetUint64Prop (&Node, mIntConfigTable[Index].Key, &mIntConfigTable[Index].Value);
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      DEBUG ((DEBUG_WARN, "DtFwGetUint64Prop failed for key %a: %d\n", mIntConfigTable[Index].Key, FdtStatus));
+    }
+
+    BuffWalk = BuffWalk + WalkLength + 1;
+    Index++;
+    PropNameBufferSize = PropNameBufferSize - (WalkLength + 1);
+  }
+
+  mIntConfigTableEntryCount = Index;
+
+  Status = EFI_SUCCESS;
+  return Status;
+}
+
+/**
+  This function parses device tree for Str Configuration parameter entries
+  into StrConfigTable Structure and the count of entries into StrConfigTableEntryCount.
+
+  @retval EFI_SUCCESS           StrConfigTable Structure is updated with all Str ConfigParams.
+  @retval EFI_LOAD_ERROR        Failed to update aall Str ConfigParams to StrConfigTable Struct.
+
+**/
+EFI_STATUS
+EFIAPI
+ParseStrConfigEntriesFromDT (
+  VOID
+  )
+{
+  EFI_STATUS      Status;
+  INT32           FdtStatus;
+  DT_NODE_HANDLE  Node;
+  UINT64          MaxStrConfigPairCount;
+  UINT32          PropNameBufferSize;
+  CHAR8           *Buff;
+  CHAR8           *BuffWalk;
+  UINT64          Index;
+  UINT32          WalkLength;
+  UINT32          ValueBufferSize;
+  UINTN           AllocSize;
+
+  Status                = EFI_LOAD_ERROR;
+  AllocSize             = 0;
+  MaxStrConfigPairCount = 0;
+  PropNameBufferSize    = 0;
+  Buff                  = NULL;
+  BuffWalk              = NULL;
+  Index                 = 0;
+  WalkLength            = 0;
+  ValueBufferSize       = 0;
+
+  // Check if table is empty and Allocate table based of the total count
+  if (mStrConfigTable == NULL) {
+    /*
+     * NOTE: StrMaxCount is stored under /sw/uefi/int_param (not str_param)
+     * by DTB convention - both integer and string config max-count properties
+     * are co-located in the int_param node.  This is intentional; do not
+     * change this to str_param.
+     */
+    FdtStatus = SecFdtGetNodeHandle (&Node, "/sw/uefi/int_param");
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      return Status;
+    }
+
+    FdtStatus = DtFwGetUint64Prop (&Node, "StrMaxCount", &MaxStrConfigPairCount);
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      return Status;
+    }
+
+    if ((MaxStrConfigPairCount == 0) || (MaxStrConfigPairCount > 0x10000ULL)) {
+      DEBUG ((
+        DEBUG_ERROR,
+        "ParseStrConfigEntriesFromDT: StrMaxCount %llu out of range\n",
+        MaxStrConfigPairCount
+        ));
+      return Status;
+    }
+
+    AllocSize       = (UINTN)MaxStrConfigPairCount * sizeof (STRING_CONFIGURATION_PAIR);
+    mStrConfigTable = AllocateMemNoFree (AllocSize);
+    if (mStrConfigTable == NULL) {
+      DEBUG ((DEBUG_ERROR, "Failed to allocate enough memory for config table \n"));
+      ASSERT (mStrConfigTable != NULL);
+      return Status;
+    }
+
+    SetMem (mStrConfigTable, AllocSize, 0);
+  }
+
+  // Update the table with Key and Value Pairs
+  FdtStatus = SecFdtGetNodeHandle (&Node, "/sw/uefi/str_param");
+  if (FdtStatus != FDT_ERR_QC_NOERROR) {
+    return Status;
+  }
+
+  FdtStatus = DtFwGetPropNamesSizeOfNode (&Node, &PropNameBufferSize);
+  if (FdtStatus != FDT_ERR_QC_NOERROR) {
+    return Status;
+  }
+
+  if (PropNameBufferSize == 0) {
+    return EFI_SUCCESS;
+  }
+
+  Buff = AllocateMemNoFree (PropNameBufferSize);
+  if (Buff == NULL) {
+    DEBUG ((DEBUG_ERROR, "Failed to allocate PropNameBuff\n"));
+    ASSERT (Buff != NULL);
+    return Status;
+  }
+
+  FdtStatus = DtFwGetPropNamesOfNode (&Node, Buff, PropNameBufferSize);
+  if (FdtStatus != FDT_ERR_QC_NOERROR) {
+    return Status;
+  }
+
+  // Walk through buffer and store property names in Table
+  BuffWalk = (CHAR8 *)Buff;
+  while (PropNameBufferSize != 0) {
+    if (Index >= MaxStrConfigPairCount) {
+      DEBUG ((DEBUG_ERROR, "ParseStrConfigEntriesFromDT: Index %llu exceeds MaxCount\n", Index));
+      break;
+    }
+
+    WalkLength = AsciiStrLen (BuffWalk);
+
+    if (WalkLength >= MAX_UINT32) {
+      DEBUG ((DEBUG_ERROR, "ParseStrConfigEntriesFromDT: WalkLength overflow\n"));
+      return Status;
+    }
+
+    if ((WalkLength + 1) > PropNameBufferSize) {
+      DEBUG ((DEBUG_ERROR, "ParseStrConfigEntriesFromDT: malformed PropNameBuff, WalkLength+1 exceeds remaining size\n"));
+      return Status;
+    }
+
+    mStrConfigTable[Index].Key = AllocateMemNoFree (WalkLength+1);
+    if (mStrConfigTable[Index].Key == NULL) {
+      DEBUG ((DEBUG_ERROR, "Failed to allocate StrConfigTable Key\n"));
+      return Status;
+    }
+
+    AsciiStrCpyS (mStrConfigTable[Index].Key, WalkLength+1, BuffWalk);
+
+    FdtStatus = DtFwGetPropSize (&Node, mStrConfigTable[Index].Key, &ValueBufferSize);
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      return Status;
+    }
+
+    mStrConfigTable[Index].Value = AllocateMemNoFree (ValueBufferSize);
+    if (mStrConfigTable[Index].Value == NULL) {
+      DEBUG ((DEBUG_ERROR, "Failed to allocate StrConfigTable Value\n"));
+      return Status;
+    }
+
+    FdtStatus = DtFwGetStringPropList (&Node, mStrConfigTable[Index].Key, mStrConfigTable[Index].Value, ValueBufferSize);
+    if (FdtStatus != FDT_ERR_QC_NOERROR) {
+      return Status;
+    }
+
+    BuffWalk = BuffWalk + WalkLength + 1;
+    Index++;
+    PropNameBufferSize = PropNameBufferSize - (WalkLength + 1);
+  }
+
+  mStrConfigTableEntryCount = Index;
+
+  Status = EFI_SUCCESS;
+  return Status;
+}
+
+/**
+  Compare two memory region entries for sorting.
+
+  Comparison function used by QuickSort to order memory regions by
+  base address and size.
+
+  @param[in]  Left   Pointer to left memory region entry.
+  @param[in]  Right  Pointer to right memory region entry.
+
+  @retval  <0   Left entry base address is less than right.
+  @retval  0    Entries have equal base addresses.
+  @retval  >0   Left entry base address is greater than right.
+
+**/
+INTN
+MemEntryCompare (
+  CONST VOID  *Left,
+  CONST VOID  *Right
+  )
+{
+  SORT_MEM_REG_INFO  *LeftEntry;
+  SORT_MEM_REG_INFO  *RightEntry;
+
+  LeftEntry  = (SORT_MEM_REG_INFO *)Left;
+  RightEntry = (SORT_MEM_REG_INFO *)Right;
+
+  if (LeftEntry->MemBase != RightEntry->MemBase) {
+    return (INTN)(LeftEntry->MemBase - RightEntry->MemBase);
+  } else {
+    return (INTN)(LeftEntry->MemSize - RightEntry->MemSize);
+  }
+}
+
+/**
+  Validate memory region entries.
+
+  Sorts memory regions and checks for overlapping regions in the
+  configuration.
+
+  @param[in]  Sort  Pointer to array of memory region entries to validate.
+
+**/
+VOID
+ValidateEntry (
+  IN SORT_MEM_REG_INFO  *Sort
+  )
+{
+  UINTN  Index;
+
+  // Sort in increasing order
+  PerformQuickSort (Sort, mNumMemRegions, sizeof (SORT_MEM_REG_INFO), (SORT_COMPARE)MemEntryCompare);
+
+  // Check overlap
+  for (Index = 1; Index < mNumMemRegions; Index++) {
+    if (Sort[Index].MemBase < (Sort[Index-1].MemBase + Sort[Index-1].MemSize)) {
+      DEBUG ((
+        DEBUG_ERROR,
+        "MemRegion \"%s\" (0x%x) and \"%s\" (0x%x) are overlapping in cfg\n",
+        Sort[Index].Name,
+        Sort[Index].MemBase,
+        Sort[Index-1].Name,
+        Sort[Index-1].MemBase
+        ));
+      ASSERT (FALSE);
+    }
+  }
+}
+
+/**
+  Check for overlapping memory regions.
+
+  Verifies that memory regions in the configuration do not overlap
+  with each other. Asserts if overlaps are detected.
+
+**/
+VOID
+CheckOverlap (
+  VOID
+  )
+{
+  UINTN              Index;
+  SORT_MEM_REG_INFO  *pSort;
+
+  pSort = NULL;
+
+  pSort = (SORT_MEM_REG_INFO *)AllocatePool (mNumMemRegions * sizeof (SORT_MEM_REG_INFO));
+  if (pSort == NULL) {
+    DEBUG ((DEBUG_ERROR, "MemoryAlloc failed\n"));
+    ASSERT (pSort != NULL);
+    return; /* Exit the function if memory allocation fails */
+  }
+
+  for (Index = 0; Index < mNumMemRegions; Index++) {
+    pSort[Index].MemBase = mMemRegions[Index].MemBase;
+    pSort[Index].MemSize = mMemRegions[Index].MemSize;
+    AsciiStrToUnicodeStrS (mMemRegions[Index].Name, pSort[Index].Name, MAX_MEM_LABEL_NAME);
+  }
+
+  ValidateEntry (pSort);
+
+  if (pSort != NULL) {
+    FreePool (pSort);
+    pSort = NULL;
+  }
+}
+
+/**
+  This function parses given memory map node and updates the MemRegion struct.
+
+  @param  Node                  Pointer to FDT_NODE_HANDLE for Memory/Register Map Entry.
+  @param  MemRegion             Pointer to mMemRegion Table Member to be updated.
+
+  @retval EFI_SUCCESS           All the Entries of MemRegion is updated.
+  @retval EFI_LOAD_ERROR        One of the query to DTB failed and MemRegion is not fully updated.
+
+**/
+EFI_STATUS
+EFIAPI
+GetMemoryMapOfNode (
+  IN OUT DT_NODE_HANDLE   *Node,
+  OUT    MEM_REGION_INFO  *MemRegion
+  )
+{
+  EFI_STATUS  Status;
+
+  Status = DtFwGetReg (Node, NULL, 0, 2, 2, &MemRegion->MemBase, &MemRegion->MemSize);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetReg: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  Status = DtFwGetStringPropList (Node, "mem-label", (CHAR8 *)&(MemRegion->Name), MAX_MEM_LABEL_NAME);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetStringPropList MemLabel: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  Status = DtFwGetUint8Prop (Node, "build-hob", (UINT8 *)&MemRegion->BuildHobOption);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetUint8Prop BuildHob: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  Status = DtFwGetUint8Prop (Node, "resource-type", (UINT8 *)&MemRegion->ResourceType);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetUint8Prop ResourceType: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  Status = DtFwGetUint8Prop (Node, "memory-type", (UINT8 *)&MemRegion->MemoryType);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetUint8Prop MemoryType: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  Status = DtFwGetUint8Prop (Node, "cache-attributes", (UINT8 *)&MemRegion->CacheAttributes);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetUint8Prop CacheAttributes: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  Status = DtFwGetUint32Prop (Node, "resource-attribute", (UINT32 *)&MemRegion->ResourceAttribute);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetUint32Prop ResourceAttribute: %d\n", Status));
+    Status = EFI_LOAD_ERROR;
+    return Status;
+  }
+
+  return EFI_SUCCESS;
+}
+
+/**
+  This function parses device tree and updates all the memory map entries
+  into mMemRegion Structure and the count of entries into mNumMemRegions.
+
+  @retval EFI_SUCCESS           mMemRegion Structure is updated with all the memory map entries from DT.
+  @retval EFI_LOAD_ERROR        Failed to update all the memory map entries to mMemRegionStruct.
+
+**/
+EFI_STATUS
+EFIAPI
+ParseMemoryMapEntriesFromDT (
+  VOID
+  )
+{
+  DT_NODE_HANDLE  Node;
+  EFI_STATUS      Status;
+  UINT32          MemEntryCount;
+  DT_NODE_HANDLE  *CachedMmapNode;
+  UINTN           MemIndex;
+
+  MemEntryCount  = 0;
+  CachedMmapNode = NULL;
+  MemIndex       = 0;
+
+  /*
+   * Allocate the region table on first call.  On re-entry (e.g. a second
+   * parse pass) the existing buffer is reused; always zero it so stale
+   * entries from the previous call do not corrupt the new parse result.
+   */
+  if (mMemRegions == NULL) {
+    mMemRegions = (MEM_REGION_INFO *)AllocateMemNoFree (sizeof (MEM_REGION_INFO) * MAX_MEMORY_REGIONS);
+    if (mMemRegions == NULL) {
+      DEBUG ((DEBUG_ERROR, "Unable to allocate memory for memory table!\n"));
+      ASSERT (mMemRegions != NULL);
+      CpuDeadLoop ();
+      return EFI_LOAD_ERROR;
+    }
+  }
+
+  SetMem (mMemRegions, sizeof (MEM_REGION_INFO) * MAX_MEMORY_REGIONS, 0);
+  mNumMemRegions = 0;
+
+  Status = SecFdtGetNodeHandle (&Node, "/soc/memorymap/");
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "SecFdtGetNodeHandle: %d\n", Status));
+    goto ErrorExit;
+  }
+
+  Status = DtFwGetCountOfSubnodes (&Node, &MemEntryCount);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetCountOfSubnodes: %d\n", Status));
+    goto ErrorExit;
+  }
+
+  if (MemEntryCount == 0) {
+    mNumMemRegions = 0;
+    return EFI_SUCCESS;
+  }
+
+  ASSERT (mNumMemRegions == 0);
+
+  if (MemEntryCount > MAX_MEMORY_REGIONS - mNumMemRegions) {
+    DEBUG ((
+      DEBUG_ERROR,
+      "ParseMemoryMapEntriesFromDT: MemEntryCount %d would exceed MAX_MEMORY_REGIONS %d\n",
+      MemEntryCount,
+      MAX_MEMORY_REGIONS
+      ));
+    goto ErrorExit;
+  }
+
+  CachedMmapNode = (DT_NODE_HANDLE *)AllocateMemNoFree (sizeof (DT_NODE_HANDLE) * MemEntryCount);
+  if (CachedMmapNode == NULL) {
+    DEBUG ((DEBUG_ERROR, "AllocateMemNoFree for CachedMmapNode failed\n"));
+    goto ErrorExit;
+  }
+
+  Status = DtFwGetCacheOfSubnodes (&Node, CachedMmapNode, MemEntryCount);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetCacheOfSubnodes: %d\n", Status));
+    goto ErrorExit;
+  }
+
+  // Fill the table by looping through the entries
+  for (MemIndex = 0; MemIndex < MemEntryCount; MemIndex++) {
+    Status = GetMemoryMapOfNode (&CachedMmapNode[MemIndex], &mMemRegions[mNumMemRegions]);
+    if (Status) {
+      DEBUG ((DEBUG_ERROR, "GetMemoryMapOfNode Failed\n"));
+      goto ErrorExit;
+    }
+
+    mNumMemRegions++;
+  }
+
+  return EFI_SUCCESS;
+
+ErrorExit:
+  DEBUG ((DEBUG_ERROR, "Failed ParseMemoryMapEntriesFromDT\r\n"));
+  return EFI_LOAD_ERROR;
+}
+
+/**
+  This function parses device tree and updates all the register map entries
+  into mMemRegion Structure and update mNumMemRegions count.
+
+  @retval EFI_SUCCESS           mMemRegion Structure is updated with all the register map entries from DT.
+  @retval EFI_LOAD_ERROR        Failed to update all the register map entries to mMemRegionStruct.
+
+**/
+EFI_STATUS
+EFIAPI
+ParseRegisterMapEntriesFromDT (
+  VOID
+  )
+{
+  DT_NODE_HANDLE  Node;
+  EFI_STATUS      Status;
+  UINT32          RegisterEntryCount;
+  DT_NODE_HANDLE  *CachedMmapNode;
+  UINTN           RegIndex;
+
+  RegisterEntryCount = 0;
+  CachedMmapNode     = NULL;
+  RegIndex           = 0;
+
+  // Check if the mMemRegions is Empty and assign space as per number of mNumMemRegions
+  if (mMemRegions == NULL) {
+    mMemRegions = (MEM_REGION_INFO *)AllocateMemNoFree (sizeof (MEM_REGION_INFO) * MAX_MEMORY_REGIONS);
+    if (mMemRegions == NULL) {
+      DEBUG ((DEBUG_ERROR, "Unable to allocate memory for memory table!\n"));
+      ASSERT (mMemRegions != NULL);
+      CpuDeadLoop ();
+      return EFI_LOAD_ERROR;
+    }
+
+    SetMem (mMemRegions, sizeof (MEM_REGION_INFO) * MAX_MEMORY_REGIONS, 0);
+  }
+
+  Status = SecFdtGetNodeHandle (&Node, "/soc/registermap/");
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "SecFdtGetNodeHandle: %d\n", Status));
+    goto ErrorExit;
+  }
+
+  Status = DtFwGetCountOfSubnodes (&Node, &RegisterEntryCount);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetCountOfSubnodes: %d\n", Status));
+    goto ErrorExit;
+  }
+
+  if (RegisterEntryCount == 0) {
+    return EFI_SUCCESS;
+  }
+
+  CachedMmapNode = (DT_NODE_HANDLE *)AllocateMemNoFree (sizeof (DT_NODE_HANDLE) * RegisterEntryCount);
+  if (CachedMmapNode == NULL) {
+    DEBUG ((DEBUG_ERROR, "AllocateMemNoFree for CachedMmapNode failed\n"));
+    goto ErrorExit;
+  }
+
+  Status = DtFwGetCacheOfSubnodes (&Node, CachedMmapNode, RegisterEntryCount);
+  if (Status) {
+    DEBUG ((DEBUG_ERROR, "DtFwGetCacheOfSubnodes: %d\n", Status));
+    goto ErrorExit;
+  }
+
+  // Fill the table by looping through the entries
+  for (RegIndex = 0; RegIndex < RegisterEntryCount; RegIndex++) {
+    if (mNumMemRegions >= MAX_MEMORY_REGIONS) {
+      DEBUG ((DEBUG_ERROR, "ParseRegisterMapEntriesFromDT: exceeded MAX_MEMORY_REGIONS\n"));
+      goto ErrorExit;
+    }
+
+    Status = GetMemoryMapOfNode (&CachedMmapNode[RegIndex], &mMemRegions[mNumMemRegions]);
+    if (Status) {
+      DEBUG ((DEBUG_ERROR, "GetMemoryMapOfNode: %d\n", Status));
+      goto ErrorExit;
+    }
+
+    mNumMemRegions++;
+  }
+
+  return EFI_SUCCESS;
+
+ErrorExit:
+  DEBUG ((DEBUG_ERROR, "Failed ParseRegisterMapEntriesFromDT\r\n"));
+  return EFI_LOAD_ERROR;
 }
 
 /**
@@ -504,6 +1183,29 @@ UpdateSystemMemoryRegions (
 }
 
 /**
+  Initialize cache with memory regions.
+
+  Initializes the ARM MMU cache settings for all configured memory
+  regions.
+
+  @retval  EFI_SUCCESS     Cache initialized successfully.
+  @retval  EFI_LOAD_ERROR  Error occurred during initialization.
+
+**/
+EFI_STATUS EFIAPI
+InitCacheWithMemoryRegions (
+  VOID
+  )
+{
+  /* Initialize cache with new memory map */
+  if (InitMmu (mMemRegions, mNumMemRegions) != EFI_SUCCESS) {
+    return EFI_LOAD_ERROR;
+  }
+
+  return EFI_SUCCESS;
+}
+
+/**
   Load and parse platform configuration.
 
   Parses UEFI platform configuration data (memory map, register map,
@@ -520,7 +1222,51 @@ LoadAndParsePlatformCfg (
   VOID
   )
 {
-  return EFI_UNSUPPORTED;
+  EFI_STATUS  Status;
+
+  Status = ParseMemoryMapEntriesFromDT ();
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((DEBUG_ERROR, "ParseMemoryMapEntriesFromDT failed\r\n"));
+    Status = EFI_LOAD_ERROR;
+    goto ErrorExit;
+  }
+
+  mNumMemoryMapRegion = mNumMemRegions;
+
+  GetConfigurationMemMapBounds ();
+
+  Status = ParseRegisterMapEntriesFromDT ();
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((DEBUG_ERROR, "ParseRegisterMapEntriesFromDT failed\r\n"));
+    Status = EFI_LOAD_ERROR;
+    goto ErrorExit;
+  }
+
+  CheckOverlap ();
+
+  mIntConfigTable           = NULL;
+  mIntConfigTableEntryCount = 0;
+  Status                    = ParseIntConfigEntriesFromDT ();
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((DEBUG_ERROR, "ParseIntConfigEntriesFromDT failed\r\n"));
+    Status = EFI_LOAD_ERROR;
+    goto ErrorExit;
+  }
+
+  mStrConfigTable           = NULL;
+  mStrConfigTableEntryCount = 0;
+  Status                    = ParseStrConfigEntriesFromDT ();
+  if (Status != EFI_SUCCESS) {
+    DEBUG ((DEBUG_ERROR, "ParseStrConfigEntriesFromDT failed\r\n"));
+    Status = EFI_LOAD_ERROR;
+    goto ErrorExit;
+  }
+
+  return EFI_SUCCESS;
+
+ErrorExit:
+  DEBUG ((DEBUG_ERROR, "Failed LoadAndParsePlatformCfg\r\n"));
+  return Status;
 }
 
 /**

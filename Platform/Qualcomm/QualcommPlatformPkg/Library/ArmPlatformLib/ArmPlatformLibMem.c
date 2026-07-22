@@ -32,8 +32,7 @@
 
 #include "MemRegionInfo.h"
 #include "PlatformConfiguration.h"
-
-#define MAX_MEMORY_ENTRIES  (128)
+#include "PlatformDeviceTree.h"
 
 /**
   Configure early MMU mappings for UART, DTB, system memory, SMEM, and IMEM.
@@ -289,7 +288,12 @@ ArmPlatformSetupDebugBuffer (
 /**
   Load platform memory configuration from the boot device tree.
 
-  @retval  EFI_UNSUPPORTED  Not yet implemented.
+  Initializes the DTB blob and parses the platform configuration
+  (memory map, register map, config parameters) from the device tree.
+
+  @retval  EFI_SUCCESS      Configuration loaded successfully.
+  @retval  EFI_UNSUPPORTED  DTB initialization failed (no DTB available).
+  @retval  Other            Platform configuration parse error.
 
 **/
 STATIC
@@ -298,7 +302,19 @@ LoadPlatformConfigFromDeviceTree (
   VOID
   )
 {
-  return EFI_UNSUPPORTED;
+  EFI_STATUS  Status;
+
+  Status = DtbInit ();
+  if (Status != EFI_SUCCESS) {
+    return EFI_UNSUPPORTED;
+  }
+
+  Status = LoadAndParsePlatformCfg ();
+  if (Status != EFI_SUCCESS) {
+    return Status;
+  }
+
+  return EFI_SUCCESS;
 }
 
 /**
