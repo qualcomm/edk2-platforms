@@ -20,15 +20,17 @@
 #include <Library/ArmPlatformLib.h>
 #include <Library/BaseMemoryLib.h>
 #include <Library/CacheMaintenanceLib.h>
+#include <Library/ChipInfoLib.h>
 #include <Library/DebugLib.h>
 #include <Library/HobLib.h>
 #include <Library/PcdLib.h>
+#include <Library/PlatformInfoLib.h>
 #include <Library/RamPartitionTableLib.h>
 #include <Library/SmemLib.h>
 
-#include <PiPei.h>
-#include <Pi/PiHob.h>
 #include <Pi/PiBootMode.h>
+#include <Pi/PiHob.h>
+#include <PiPei.h>
 
 #include "MemRegionInfo.h"
 #include "PlatformConfiguration.h"
@@ -473,6 +475,160 @@ DisplayRamPartitionInformation (
 }
 
 /**
+  Print chip identification information obtained from ChipInfoLib.
+
+**/
+VOID
+PrintChipInformation (
+  VOID
+  )
+{
+  ChipInfoResult    Result;
+  CHAR8             ChipIdStr[CHIPINFO_MAX_ID_LENGTH];
+  CHAR8             MarketingNameStr[CHIPINFO_MAX_NAME_LENGTH];
+  ChipInfoSKUType   Sku;
+  UINT32            NumClusters;
+  UINT32            BootCluster;
+  UINT32            BootCore;
+  UINT32            Cluster;
+  UINT32            Cores;
+  UINT32            Mask;
+  UINT32            Part;
+  BOOLEAN           Disabled;
+
+  Result = ChipInfoInit ();
+  if (Result != CHIPINFO_SUCCESS) {
+    DEBUG ((DEBUG_ERROR, "ChipInfoInit failed: %d\n", Result));
+    return;
+  }
+
+  DEBUG ((DEBUG_INFO, "ChipVersion:            0x%08x\n", ChipInfoGetChipVersion ()));
+  DEBUG ((DEBUG_INFO, "RawChipVersion:         0x%08x\n", ChipInfoGetRawChipVersion ()));
+  DEBUG ((DEBUG_INFO, "ChipId:                 %d\n", (UINT32)ChipInfoGetChipId ()));
+  DEBUG ((DEBUG_INFO, "RawChipId:              0x%08x\n", ChipInfoGetRawChipId ()));
+  DEBUG ((DEBUG_INFO, "ChipFamily:             %d\n", (UINT32)ChipInfoGetChipFamily ()));
+  DEBUG ((DEBUG_INFO, "ModemSupport:           0x%08x\n", ChipInfoGetModemSupport ()));
+  DEBUG ((DEBUG_INFO, "SerialNumber:           0x%08x\n", ChipInfoGetSerialNumber ()));
+  DEBUG ((DEBUG_INFO, "FoundryId:              %d\n", (UINT32)ChipInfoGetFoundryId ()));
+  DEBUG ((DEBUG_INFO, "RawDeviceFamily:        0x%08x\n", ChipInfoGetRawDeviceFamily ()));
+  DEBUG ((DEBUG_INFO, "RawDeviceNumber:        0x%08x\n", ChipInfoGetRawDeviceNumber ()));
+  DEBUG ((DEBUG_INFO, "QFPROMChipId:           0x%08x\n", ChipInfoGetQfpromChipId ()));
+  DEBUG ((DEBUG_INFO, "RawPackageType:         0x%08x\n", ChipInfoGetRawPackageType ()));
+
+  Result = ChipInfoGetChipIdString (ChipIdStr, sizeof (ChipIdStr));
+  DEBUG ((
+    DEBUG_INFO,
+    "ChipIdString:           %a\n",
+    (Result == CHIPINFO_SUCCESS) ? ChipIdStr : "<unavailable>"
+    ));
+
+  Result = ChipInfoGetMarketingNameString (MarketingNameStr, sizeof (MarketingNameStr));
+  DEBUG ((
+    DEBUG_INFO,
+    "MarketingName:          %a\n",
+    (Result == CHIPINFO_SUCCESS) ? MarketingNameStr : "<unavailable>"
+    ));
+
+  Result = ChipInfoGetSKU (&Sku);
+  if (Result == CHIPINFO_SUCCESS) {
+    DEBUG ((DEBUG_INFO, "SKU:                    FeatureCode=0x%x PCode=0x%x\n", Sku.eFeatureCode, Sku.ePCode));
+  } else {
+    DEBUG ((DEBUG_WARN, "SKU:                    <unavailable> (%d)\n", Result));
+  }
+
+  Result = ChipInfoGetNumFunctionalClusters (&NumClusters);
+  if (Result == CHIPINFO_SUCCESS) {
+    DEBUG ((DEBUG_INFO, "NumFunctionalClusters:  %d\n", NumClusters));
+  } else {
+    DEBUG ((DEBUG_WARN, "NumFunctionalClusters:  <unavailable> (%d)\n", Result));
+  }
+
+  Result = ChipInfoGetBootClusterAndCore (&BootCluster, &BootCore);
+  if (Result == CHIPINFO_SUCCESS) {
+    DEBUG ((DEBUG_INFO, "BootCluster/BootCore:   %d / %d\n", BootCluster, BootCore));
+  } else {
+    DEBUG ((DEBUG_WARN, "BootCluster/BootCore:   <unavailable> (%d)\n", Result));
+  }
+
+  for (Cluster = 0; Cluster < CHIPINFO_MAX_CPU_CLUSTERS; Cluster++) {
+    Result = ChipInfoGetDisabledCpus (Cluster, &Mask);
+    if (Result == CHIPINFO_SUCCESS) {
+      DEBUG ((DEBUG_INFO, "Cluster %d DisabledCPUs: 0x%08x\n", Cluster, Mask));
+    }
+
+    Result = ChipInfoGetNumCpuCores (Cluster, &Cores);
+    if (Result == CHIPINFO_SUCCESS) {
+      DEBUG ((DEBUG_INFO, "Cluster %d NumCPUCores:  %d\n", Cluster, Cores));
+    }
+  }
+
+  for (Part = 0; Part < CHIPINFO_NUM_PARTS; Part++) {
+    Result = ChipInfoGetDisabledFeatures ((ChipInfoPartType)Part, 0, &Mask);
+    if (Result == CHIPINFO_SUCCESS) {
+      DEBUG ((DEBUG_INFO, "Part %d DisabledFeatures: 0x%08x\n", Part, Mask));
+    }
+
+    Result = ChipInfoIsPartDisabled ((ChipInfoPartType)Part, 0, &Disabled);
+    if (Result == CHIPINFO_SUCCESS) {
+      DEBUG ((DEBUG_INFO, "Part %d Disabled:        %a\n", Part, Disabled ? "TRUE" : "FALSE"));
+    }
+  }
+}
+
+/**
+  Print platform identification information obtained from PlatformInfoLib.
+
+**/
+STATIC
+VOID
+PrintPlatformInformation (
+  VOID
+  )
+{
+  PlatformInfoResult             Result;
+  PlatformInfoPlatformInfoType   PlatformInfo;
+  UINT32                         Value;
+  UINT32                         Key;
+
+  Result = PlatformInfoInit ();
+  if (Result != PLATFORMINFO_SUCCESS) {
+    DEBUG ((DEBUG_ERROR, "PlatformInfoInit failed: %d\n", Result));
+    return;
+  }
+
+  DEBUG ((DEBUG_INFO, "==== Platform Information ====\n"));
+  DEBUG ((DEBUG_INFO, "Platform:           %d\n", (UINT32)PlatformInfoGetPlatformType ()));
+  DEBUG ((DEBUG_INFO, "PlatformSubtype:    %d\n", PlatformInfoGetPlatformSubtype ()));
+  DEBUG ((DEBUG_INFO, "PlatformVersion:    0x%08x\n", PlatformInfoGetPlatformVersion ()));
+  DEBUG ((DEBUG_INFO, "IsFusion:           %a\n", PlatformInfoIsFusion () ? "TRUE" : "FALSE"));
+  DEBUG ((DEBUG_INFO, "OEMVariant:         %d\n", PlatformInfoGetOemVariant ()));
+
+  Result = PlatformInfoGetPlatformInfo (&PlatformInfo);
+  if (Result == PLATFORMINFO_SUCCESS) {
+    DEBUG ((
+      DEBUG_INFO,
+      "PlatformInfo:       Platform=%d Version=0x%08x Subtype=%d Fusion=%a OEMVariantID=%d\n",
+      (UINT32)PlatformInfo.PlatformType,
+      PlatformInfo.Version,
+      PlatformInfo.Subtype,
+      PlatformInfo.Fusion ? "TRUE" : "FALSE",
+      PlatformInfo.OemVariantId
+      ));
+  } else {
+    DEBUG ((DEBUG_WARN, "PlatformInfo:       <unavailable> (%d)\n", Result));
+  }
+
+  for (Key = 0; Key < PLATFORMINFO_NUM_KEYS; Key++) {
+    Result = PlatformInfoGetKeyValue ((PlatformInfoKeyType)Key, &Value);
+    if (Result == PLATFORMINFO_SUCCESS) {
+      DEBUG ((DEBUG_INFO, "Key %d Value:        0x%08x\n", Key, Value));
+    } else {
+      DEBUG ((DEBUG_WARN, "Key %d Value:        <unavailable> (%d)\n", Key, Result));
+    }
+  }
+}
+
+/**
   Return the virtual memory map for this platform.
 
   @param[out]  VirtualMemoryMap  Receives a pointer to the ARM MMU descriptor array.
@@ -495,6 +651,10 @@ ArmPlatformGetVirtualMemoryMap (
 
   SmemInit ();
   DEBUG ((DEBUG_INFO, "SmemInit\n"));
+
+  /* Print Chip and Platform Information */
+  PrintChipInformation ();
+  PrintPlatformInformation ();
 
   Status = EarlyCacheInit ();
   if (Status != EFI_SUCCESS) {
