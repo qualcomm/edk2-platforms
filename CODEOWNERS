@@ -101,6 +101,8 @@
 
 # Qualcomm MinPlatform
 /Silicon/Qualcomm/QualcommSiliconPkg/** @leiflindholm @aiyengar-qc @vishalo
+/Silicon/Qualcomm/Common/** @leiflindholm @aiyengar-qc @vishalo
+/Platform/Qualcomm/Common/** @leiflindholm @aiyengar-qc @vishalo
 
 # Raspberry Pi platforms and silicon
 /Platform/RaspberryPi/** @ardbiesheuvel @leiflindholm
