@@ -1,0 +1,26 @@
+## @file
+# Qualcomm common silicon package declaration file.
+#
+# Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.<BR>
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+#
+##
+
+[Defines]
+  DEC_SPECIFICATION              = 1.27
+  PACKAGE_NAME                   = QualcommCommonSiliconPkg
+  PACKAGE_GUID                   = 6A09FB21-75A3-4B3C-B177-CB2A3171CF89
+  PACKAGE_VERSION                = 0.1
+
+################################################################################
+#
+# Include Section - list of Include Paths that are provided by this package.
+#                   Comments are used for Keywords and Module Types.
+#
+################################################################################
+
+[Includes.common]
+  Include
+
+[Guids]
+  gQualcommCommonSiliconPkgTokenSpaceGuid     = {0xDCC48FA6, 0X5910, 0X4A76, {0X90, 0X19, 0X7D, 0X67, 0X67, 0X21, 0XF3, 0XC2}}
