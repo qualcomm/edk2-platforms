@@ -25,3 +25,11 @@
 
 [Guids]
   gQualcommCommonPlatformPkgTokenSpaceGuid     = {0XB7BF47E4, 0X94FE, 0X4641, {0X83, 0X4F, 0XC5, 0XB9, 0X8E, 0XFF, 0XD5, 0XBE}}
+  gEfiDtbExtensionInterfaceHobGuid             = {0x1F5D141C, 0X6D8D, 0X42C0, {0XB5, 0X77, 0XD9, 0X1A, 0X57, 0XBC, 0X9C, 0X33}}
+
+[LibraryClasses]
+  ##  @libraryclass  Provides UEFI-style wrapper functions for the Qualcomm
+  ##                 DTFramework Device Tree APIs.
+  ##
+  DtFrameworkLib|Include/DtFrameworkLib.h
+
