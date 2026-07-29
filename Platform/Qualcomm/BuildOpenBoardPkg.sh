@@ -154,8 +154,8 @@ $WORKSPACE/edk2:\
 $WORKSPACE/edk2-platforms:\
 $WORKSPACE/edk2-platforms/Platform:\
 $WORKSPACE/edk2/ArmPlatformPkg:\
-$WORKSPACE/edk2-platforms/Platform/Qualcomm/Common:\
 $WORKSPACE/edk2-platforms/Platform/Qualcomm:\
+$WORKSPACE/edk2-platforms/Platform/Qualcomm/Common:\
 $WORKSPACE/edk2-platforms/Silicon/Qualcomm
 
 # Initialize EDK2 build environment
